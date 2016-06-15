@@ -98,6 +98,7 @@ public final class JavaGenerator {
   static final ClassName ADAPTER = ClassName.get(ProtoAdapter.class);
   static final ClassName BUILDER = ClassName.get(Message.Builder.class);
   static final ClassName NULLABLE = ClassName.get("android.support.annotation", "Nullable");
+  static final ClassName PARCEL = ClassName.get("android.os", "Parcel");
   static final ClassName CREATOR = ClassName.get("android.os", "Parcelable", "Creator");
 
   private static final Map<ProtoType, TypeName> BUILT_IN_TYPES_MAP =
@@ -132,7 +133,7 @@ public final class JavaGenerator {
    * <p>Name allocations are computed once and reused because some types may be needed when
    * generating other types.
    */
-  private final LoadingCache<MessageType, NameAllocator> nameAllocators
+  private final LoadingCache<MessageType, NameAllocator> messageNameAllocators
       = CacheBuilder.newBuilder().build(new CacheLoader<MessageType, NameAllocator>() {
     @Override public NameAllocator load(MessageType type) throws Exception {
       NameAllocator nameAllocator = new NameAllocator();
@@ -148,6 +149,22 @@ public final class JavaGenerator {
             ? field.qualifiedName()
             : field.name();
         nameAllocator.newName(suggestion, field);
+      }
+      return nameAllocator;
+    }
+  });
+  private final LoadingCache<EnumType, NameAllocator> enumNameAllocators
+      = CacheBuilder.newBuilder().build(new CacheLoader<EnumType, NameAllocator>() {
+    @Override public NameAllocator load(EnumType type) throws Exception {
+      NameAllocator nameAllocator = new NameAllocator();
+      nameAllocator.newName("ADAPTER", "ADAPTER");
+      nameAllocator.newName("ENUM_OPTIONS", "ENUM_OPTIONS");
+      if (emitAndroid) {
+        nameAllocator.newName("CREATOR", "CREATOR");
+      }
+      for (EnumConstant constant : type.constants()) {
+        String suggestion = constant.name();
+        nameAllocator.newName(suggestion, constant);
       }
       return nameAllocator;
     }
@@ -317,6 +334,8 @@ public final class JavaGenerator {
   /** @deprecated Use {@link #generateType(Type)} */
   @Deprecated
   public TypeSpec generateEnum(EnumType type) {
+    NameAllocator nameAllocator = enumNameAllocators.getUnchecked(type);
+
     ClassName javaType = (ClassName) typeName(type.type());
 
     TypeSpec.Builder builder = TypeSpec.enumBuilder(javaType.simpleName())
@@ -392,13 +411,35 @@ public final class JavaGenerator {
         .endControlFlow()
         .build());
 
-    builder.addField(FieldSpec.builder(adapterOf(javaType), "ADAPTER")
+    String adapterName = nameAllocator.get("ADAPTER");
+    builder.addField(FieldSpec.builder(adapterOf(javaType), adapterName)
         .addModifiers(PUBLIC, STATIC, FINAL)
         .initializer("$T.newEnumAdapter($T.class)", ProtoAdapter.class, javaType)
         .build());
 
+    if (emitAndroid) {
+      TypeName creatorType = creatorOf(javaType);
+      String creatorName = nameAllocator.get("CREATOR");
+      builder.addField(FieldSpec.builder(creatorType, creatorName, PUBLIC, STATIC, FINAL)
+          .initializer("$T.newCreator($T.class)", ANDROID_MESSAGE, javaType)
+          .build());
+      builder.addMethod(MethodSpec.methodBuilder("describeContents")
+          .addAnnotation(Override.class)
+          .addModifiers(PUBLIC)
+          .addStatement("return 0")
+          .build());
+      builder.addMethod(MethodSpec.methodBuilder("writeToParcel")
+          .addAnnotation(Override.class)
+          .addModifiers(PUBLIC)
+          .addParameter(PARCEL, "in")
+          .addParameter(int.class, "flags")
+          .addStatement("in.writeInt(value)")
+          .build());
+    }
+
     // Enum type options.
-    FieldSpec options = optionsField(ENUM_OPTIONS, "ENUM_OPTIONS", type.options());
+    String enumOptionsName = nameAllocator.get("ENUM_OPTIONS");
+    FieldSpec options = optionsField(ENUM_OPTIONS, enumOptionsName, type.options());
     if (options != null) {
       builder.addField(options);
     }
@@ -417,7 +458,7 @@ public final class JavaGenerator {
   /** @deprecated Use {@link #generateType(Type)} */
   @Deprecated
   public TypeSpec generateMessage(MessageType type) {
-    NameAllocator nameAllocator = nameAllocators.getUnchecked(type);
+    NameAllocator nameAllocator = messageNameAllocators.getUnchecked(type);
 
     ClassName javaType = (ClassName) typeName(type.type());
     ClassName builderJavaType = javaType.nestedClass("Builder");
@@ -813,7 +854,7 @@ public final class JavaGenerator {
 
   private String fieldName(ProtoType type, Field field) {
     MessageType messageType = (MessageType) schema.getType(type);
-    NameAllocator names = nameAllocators.getUnchecked(messageType);
+    NameAllocator names = messageNameAllocators.getUnchecked(messageType);
     return names.get(field);
   }
 

@@ -2,6 +2,7 @@
 // Source file: person.proto at 21:1
 package com.squareup.wire.protos.person;
 
+import android.os.Parcel;
 import android.os.Parcelable;
 import android.support.annotation.Nullable;
 import com.squareup.wire.AndroidMessage;
@@ -203,6 +204,8 @@ public final class Person extends AndroidMessage<Person, Person.Builder> {
 
     public static final ProtoAdapter<PhoneType> ADAPTER = ProtoAdapter.newEnumAdapter(PhoneType.class);
 
+    public static final Parcelable.Creator<PhoneType> CREATOR = AndroidMessage.newCreator(PhoneType.class);
+
     private final int value;
 
     PhoneType(int value) {
@@ -219,6 +222,16 @@ public final class Person extends AndroidMessage<Person, Person.Builder> {
         case 2: return WORK;
         default: return null;
       }
+    }
+
+    @Override
+    public void describeContents() {
+      return 0;
+    }
+
+    @Override
+    public void writeToParcel(Parcel in, int flags) {
+      in.writeInt(value);
     }
 
     @Override

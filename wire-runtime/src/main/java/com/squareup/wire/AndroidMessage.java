@@ -19,6 +19,8 @@ import android.os.Parcel;
 import android.os.Parcelable;
 import java.io.IOException;
 import java.lang.reflect.Array;
+import java.lang.reflect.InvocationTargetException;
+import java.lang.reflect.Method;
 import okio.ByteString;
 
 /** An Android-specific {@link Message} which adds support for {@link Parcelable}. */
@@ -27,6 +29,11 @@ public abstract class AndroidMessage<M extends Message<M, B>, B extends Message.
   /** Creates a new {@link Parcelable.Creator} using {@code adapter} for serialization. */
   public static <E> Parcelable.Creator<E> newCreator(ProtoAdapter<E> adapter) {
     return new ProtoAdapterCreator<>(adapter);
+  }
+
+  /** Creates a new {@link Parcelable.Creator} for the supplied enum type. */
+  public static <E extends Enum<E> & WireEnum> Parcelable.Creator<E> newCreator(Class<E> type) {
+    return new EnumCreator<>(type);
   }
 
   protected AndroidMessage(ProtoAdapter<M> adapter, ByteString unknownFields) {
@@ -59,6 +66,41 @@ public abstract class AndroidMessage<M extends Message<M, B>, B extends Message.
     @Override public M[] newArray(int size) {
       //noinspection unchecked
       return (M[]) Array.newInstance(adapter.javaType, size);
+    }
+  }
+
+  private static final class EnumCreator<E> implements Creator<E> {
+    private final Class<E> type;
+    private Method fromValueMethod;
+
+    private EnumCreator(Class<E> type) {
+      this.type = type;
+    }
+
+    private Method getFromValueMethod() {
+      Method method = this.fromValueMethod;
+      if (method != null) {
+        return method;
+      }
+      try {
+        return fromValueMethod = type.getMethod("fromValue", int.class);
+      } catch (NoSuchMethodException e) {
+        throw new AssertionError(e);
+      }
+    }
+
+    @Override public E createFromParcel(Parcel source) {
+      try {
+        //noinspection unchecked
+        return (E) getFromValueMethod().invoke(source.readInt());
+      } catch (IllegalAccessException | InvocationTargetException e) {
+        throw new AssertionError(e);
+      }
+    }
+
+    @Override public E[] newArray(int size) {
+      //noinspection unchecked
+      return (E[]) Array.newInstance(type, size);
     }
   }
 }
